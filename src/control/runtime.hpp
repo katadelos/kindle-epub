@@ -7,6 +7,9 @@
 
 namespace epubctl {
 
+extern const char kLibraryDirectory[];
+extern const char kDataDirectory[];
+extern const char kLibexecDirectory[];
 extern const char kStateDirectory[];
 extern const char kRunDirectory[];
 extern const char kLockPath[];

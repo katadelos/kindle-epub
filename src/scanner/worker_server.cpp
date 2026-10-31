@@ -205,7 +205,7 @@ bool waitUntilReady() {
 } // namespace
 
 int serve(bool daemonize) {
-    const int lock = open("/var/local/kindleepub-scanner.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    const int lock = open("/var/run/kindle-epub/scanner.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (lock < 0) {
         std::perror("EPUB scanner lock");
         return 1;

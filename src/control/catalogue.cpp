@@ -27,7 +27,7 @@ const std::array<OwnedRows, 5> kOwnedRows{{
 }};
 
 std::string appregSql(const std::string& sql) {
-    return checkedCommand({"sqlite3", "/var/local/appreg.db"},
+    return checkedCommand({"/var/run/eink-sdk/usr/bin/sqlite3", "/var/local/appreg.db"},
                           ".bail on\n.timeout 10000\n" + sql + '\n');
 }
 

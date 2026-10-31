@@ -15,6 +15,6 @@ void restoreCatalogue();
 
 void startWorker(const RuntimeSelection& selection);
 void stopWorker();
-int superviseWorker(const std::string& payload);
+int superviseWorker();
 
 } // namespace epubctl

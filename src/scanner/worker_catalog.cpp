@@ -27,7 +27,7 @@ constexpr int kQueryTimeoutMs = 1500;
 class CatalogMutationLock {
 public:
     CatalogMutationLock()
-        : descriptor_(open("/var/local/kindleepub-catalog.lock",
+        : descriptor_(open("/var/run/kindle-epub/catalog.lock",
                            O_RDONLY | O_CREAT | O_CLOEXEC,
                            kLockPermissions)) {
         if (descriptor_ < 0) {

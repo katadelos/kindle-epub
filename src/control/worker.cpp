@@ -37,8 +37,7 @@ bool workerReady() {
     return result.status == 0 && trim(result.output) == "1";
 }
 
-void executeSupervisor(
-    const std::string& controller, const std::string& payload, int log, int input, int gate) {
+void executeSupervisor(const std::string& controller, int log, int input, int gate) {
     char ready = 0;
     if (read(gate, &ready, 1) != 1) {
         _exit(kChildFailure);
@@ -50,7 +49,7 @@ void executeSupervisor(
     }
     close(input);
     close(log);
-    execl(controller.c_str(), controller.c_str(), "_worker", payload.c_str(), nullptr);
+    execl(controller.c_str(), controller.c_str(), "_worker", nullptr);
     _exit(kChildFailure);
 }
 
@@ -88,7 +87,7 @@ void waitForChild(pid_t child) {
     }
 }
 
-void launchSupervisor(const std::string& payload) {
+void launchSupervisor() {
     const auto controller = processExecutable(getpid());
     const auto logPath = std::string(kRunDirectory) + "/worker.log";
     const int log = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, kFileMode);
@@ -108,7 +107,7 @@ void launchSupervisor(const std::string& payload) {
     const int forkError = errno;
     if (supervisor == 0) {
         close(gate[1]);
-        executeSupervisor(controller, payload, log, input, gate[0]);
+        executeSupervisor(controller, log, input, gate[0]);
     }
     close(log);
     close(input);
@@ -189,7 +188,7 @@ void startWorker(const RuntimeSelection& selection) {
     if (workerReady()) {
         throw std::runtime_error("Another EPUB catalogue worker already owns the service.");
     }
-    launchSupervisor(selection.payload);
+    launchSupervisor();
     for (unsigned elapsed = 0; elapsed <= kWorkerReadyTimeout; ++elapsed) {
         if (workerReady()) {
             return;
@@ -222,7 +221,7 @@ void stopWorker() {
     removeFile(marker);
 }
 
-int superviseWorker(const std::string& payload) {
+int superviseWorker() {
     struct sigaction action {};
     action.sa_handler = stopChild;
     sigemptyset(&action.sa_mask);
@@ -231,7 +230,7 @@ int superviseWorker(const std::string& payload) {
             throw std::runtime_error("Cannot install catalogue supervisor signal handler.");
         }
     }
-    const auto executablePath = payload + "/kindle-epub-import";
+    const auto executablePath = std::string(kLibexecDirectory) + "/kindle-epub-import";
     for (unsigned attempt = 0; attempt < kWorkerAttempts && workerStopping == 0; ++attempt) {
         const pid_t child = spawnWorker(executablePath);
         if (workerStopping != 0) {

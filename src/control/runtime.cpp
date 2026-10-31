@@ -12,7 +12,10 @@
 
 namespace epubctl {
 
-const char kStateDirectory[] = "/var/local/kindle-epub";
+const char kLibraryDirectory[] = "/var/run/eink-sdk/usr/lib/kindle-epub";
+const char kDataDirectory[] = "/var/run/eink-sdk/usr/share/kindle-epub";
+const char kLibexecDirectory[] = "/var/run/eink-sdk/usr/libexec/kindle-epub";
+const char kStateDirectory[] = "/mnt/us/.eink-sdk/var/lib/kindle-epub";
 const char kRunDirectory[] = "/var/run/kindle-epub";
 const char kLockPath[] = "/var/run/kindle-epub.lock";
 
@@ -197,9 +200,10 @@ RuntimeSelection validatePayload(const std::string& path) {
     RuntimeSelection selection;
     selection.payload = canonicalPath(path);
     requirePayloadPath(selection.payload);
-    const Records configuration = parseRecords(readText(selection.payload + "/runtime.conf"),
-                                               {"epub_package_format", "epub_architecture"},
-                                               false);
+    const Records configuration =
+        parseRecords(readText(std::string(kDataDirectory) + "/runtime.conf"),
+                     {"epub_package_format", "epub_architecture"},
+                     false);
     if (configuration.at("epub_package_format") != "2") {
         throw std::runtime_error("Unsupported runtime package format");
     }
@@ -210,8 +214,8 @@ RuntimeSelection validatePayload(const std::string& path) {
          selection.architecture != "kindlepw2")) {
         throw std::runtime_error("Package architecture does not match the installed userspace ABI");
     }
-    const std::string probe = selection.payload + "/kindle-epub-probe";
-    const std::string contracts = selection.payload + "/native-contracts.tsv";
+    const std::string probe = std::string(kLibexecDirectory) + "/kindle-epub-probe";
+    const std::string contracts = std::string(kDataDirectory) + "/native-contracts.tsv";
     if (!executable(probe)) {
         throw std::runtime_error("Missing native capability probe");
     }
@@ -227,8 +231,8 @@ RuntimeSelection validatePayload(const std::string& path) {
     setNativePaths(selection);
     requireFile(selection.readerLibrary);
     if (!isFile("/etc/JAVA_FREE")) {
-        for (const char* name : {"kindle-epub-java.jar",
-                                 "libkindle-epub-framework-exec.so",
+        requireFile(std::string(kDataDirectory) + "/kindle-epub-java.jar");
+        for (const char* name : {"libkindle-epub-framework-exec.so",
                                  "libkindle-epub-java-agent.so"}) {
             requireFile(selection.payload + "/" + name);
         }
@@ -237,7 +241,7 @@ RuntimeSelection validatePayload(const std::string& path) {
         requireFile(selection.nativeDir + "/libkindle-epub-extractor.so");
     }
     if (selection.backend == CatalogueBackend::Worker) {
-        const std::string worker = selection.payload + "/kindle-epub-import";
+        const std::string worker = std::string(kLibexecDirectory) + "/kindle-epub-import";
         if (!executable(worker) || !isFile("/usr/lib/ccat/libEBridge.so")) {
             throw std::runtime_error("Missing catalogue worker or stock bridge");
         }

@@ -83,7 +83,7 @@ void selectKpp(RuntimeSelection& selection) {
     }
     if (!readerExecutable.empty()) {
         const auto result =
-            runCommand({selection.payload + "/kindle-epub-probe", "--kpp", readerExecutable},
+            runCommand({std::string(kLibexecDirectory) + "/kindle-epub-probe", "--kpp", readerExecutable},
                        {},
                        {{"LD_PRELOAD", ""}});
         if (result.status == 0) {
@@ -150,7 +150,7 @@ void prepareJava(RuntimeSelection& selection) {
     }
     ensureDirectory(runPath("prepare"), kPrepareDirectoryMode);
     checkedCommand({"chmod", "0777", runPath("prepare")});
-    const auto jar = selection.payload + "/kindle-epub-java.jar";
+    const auto jar = std::string(kDataDirectory) + "/kindle-epub-java.jar";
     const auto discovery = checkedCommand({selection.javaExecutable,
                                            "-Xmx32m",
                                            "-cp",

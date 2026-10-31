@@ -1,5 +1,5 @@
-# Native payload layout shared by standalone device builds and the superbuild.
-# Host test binaries and the private static dependencies are not runtime assets.
+# Package installation layout for the native firmware interface variants.
+# Host test binaries are not runtime assets.
 if(NOT EPUB_DEVICE_BUILD)
     return()
 endif()
@@ -16,7 +16,7 @@ foreach(epub_target IN ITEMS kindle_epub kindle_epub_kpp kindle_epub_extractor)
     endif()
 endforeach()
 
-set(epub_native_destination "native/${EPUB_MOBI8_PROFILE}/abi${EPUB_CXX11_ABI}")
+set(epub_native_destination "lib/kindle-epub/native/${EPUB_MOBI8_PROFILE}/abi${EPUB_CXX11_ABI}")
 set(epub_library_permissions OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 set(epub_program_permissions
     OWNER_READ OWNER_WRITE OWNER_EXECUTE
@@ -33,7 +33,7 @@ endforeach()
 
 if(TARGET kindle_epub_extractor)
     install(TARGETS kindle_epub_extractor
-        LIBRARY DESTINATION "native/${EPUB_MOBI8_PROFILE}"
+        LIBRARY DESTINATION "lib/kindle-epub/native/${EPUB_MOBI8_PROFILE}"
         PERMISSIONS ${epub_library_permissions}
         COMPONENT Runtime)
 endif()
@@ -42,17 +42,21 @@ endif()
 foreach(epub_target IN ITEMS kindle_epub_framework_exec kindle_epub_java_agent)
     if(TARGET ${epub_target})
         install(TARGETS ${epub_target}
-            LIBRARY DESTINATION .
+            LIBRARY DESTINATION lib/kindle-epub
             PERMISSIONS ${epub_library_permissions}
             COMPONENT Runtime)
     endif()
 endforeach()
 
-foreach(epub_target IN ITEMS kindle-epub-probe kindle_epub_catalog_import kindle_epub_control)
+foreach(epub_target IN ITEMS kindle-epub-probe kindle_epub_catalog_import)
     if(TARGET ${epub_target})
         install(TARGETS ${epub_target}
-            RUNTIME DESTINATION .
+            RUNTIME DESTINATION libexec/kindle-epub
             PERMISSIONS ${epub_program_permissions}
             COMPONENT Runtime)
     endif()
 endforeach()
+
+if(TARGET kindle_epub_control)
+    install(TARGETS kindle_epub_control RUNTIME DESTINATION bin COMPONENT Runtime)
+endif()

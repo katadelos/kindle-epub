@@ -405,7 +405,8 @@ std::string processEnvironment(pid_t process, const std::string& name) {
 }
 
 bool processMaps(pid_t process, const std::string& path) {
-    return readText("/proc/" + std::to_string(process) + "/maps", true).find(path) !=
+    return readText("/proc/" + std::to_string(process) + "/maps", true).find(
+               exists(path) ? canonicalPath(path) : path) !=
            std::string::npos;
 }
 

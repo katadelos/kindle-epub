@@ -252,7 +252,7 @@ bool validArguments(const std::string& command, int argc) {
         return argc == 2 || argc == 3;
     }
     if (command == "_worker") {
-        return argc == 3;
+        return argc == 2;
     }
     if (command == "status") {
         return argc == 1 || argc == 2;
@@ -284,7 +284,7 @@ int control(int argc, char** argv) {
         return runBoot();
     }
     if (command == "_worker") {
-        return superviseWorker(argv[2]);
+        return superviseWorker();
     }
     const std::string controller = processExecutable(getpid());
     if (controller.empty()) {
