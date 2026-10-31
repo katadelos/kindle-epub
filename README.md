@@ -12,11 +12,11 @@ scope.
 
 ## Compatibility and requirements
 
-Installation requires a jailbroken Kindle, root shell access, executable
-userstore, and a supported writable boot hook. The installer recognizes the
-jailbreak bridge that invokes `/mnt/us/emergency.sh`, or a stock userstore
-startup script that sources the `MNTUS_PARAMS` file selected by
-`/etc/sysconfig/paths`.
+Installation requires a jailbroken Kindle, root shell access, and an opkg
+environment installed under `/mnt/us/.eink-sdk` with its launcher and runtime
+links available. Activation uses writable runtime state and the existing
+firmware services. Run it after each reboot from the library scriptlet or a
+root shell.
 
 Choose a package for the device's userspace and native reader interfaces:
 
@@ -39,114 +39,118 @@ when its native hooks pass discovery. A `/etc/JAVA_FREE` configuration requires
 a supported KPP reader, a native catalogue route, and a native application
 association; the file's presence alone is insufficient.
 
-`epubctl` is a native C++ executable. The boot hook launches a persistent copy
-under `/var/local/kindle-epub`, which waits for userstore and starts the installed
-payload. The payload uses process preloads and writable AppReg records. Stock firmware
-files are not rewritten. K4 uses temporary bind mounts for its Java security
-policy and pmond reader configuration; stopping the runtime removes them.
-Catalogue integration uses stock Java on K4, a scanner plugin on Touch/PW1,
-and a worker through the stock EBridge on later profiles.
+`epubctl` is a native C++ executable installed by opkg. It starts the reader
+adapters and catalogue worker on demand. The payload uses process preloads and
+writable AppReg records. Stock firmware files are not rewritten. K4 uses
+temporary bind mounts for its Java security policy and pmond reader
+configuration; stopping the runtime removes them. Catalogue integration uses
+stock Java on K4, a scanner plugin on Touch/PW1, and a worker through the stock
+EBridge on later profiles.
 
 ## Install and read
 
-Copy the matching `kindle-epub-ARCHITECTURE.tar.gz` to the Kindle. From a root
-shell, replace `ARCHITECTURE` below with the package name:
+Install the package from a configured feed containing it:
 
 ```sh
-tar -xzf /mnt/us/kindle-epub-ARCHITECTURE.tar.gz -C /mnt/us
-/mnt/us/kindle-epub/epubctl install
-/mnt/us/kindle-epub/epubctl status
+/mnt/us/.eink-sdk/control/run opkg install kindle-epub
 ```
 
-Installation restarts affected reader services, verifies activation, and enables
-the boot hook. Keep the extracted payload directory in place. Custom payload
-paths must use only letters, digits, `/`, `_`, `.`, and `-`.
+Exit the package manager, then open **Native EPUB** from the Kindle library, or
+start it from a root shell:
+
+```sh
+/mnt/us/.eink-sdk/control/run epubctl start
+/mnt/us/.eink-sdk/control/run epubctl status
+```
+
+Activation restarts affected reader services and verifies the selected native
+interfaces. Installation itself does not start the runtime. Repeat activation
+after each reboot. No persistent boot hook is installed or required.
+The library scriptlet uses `start --background` to detach before the framework
+restarts, with activation output in `/var/run/kindle-epub.log`.
 
 Copy `.epub` or `.EPUB` books into `/mnt/us/documents`, let the stock catalogue
-scan finish, and open them from Home. If a previous installation modified
-firmware files, restore those files with its matching uninstaller first.
+scan finish, and open them from Home.
 
 ## Stop, upgrade, or remove
 
-Run these commands from the installed payload:
+```sh
+/mnt/us/.eink-sdk/control/run epubctl stop
+/mnt/us/.eink-sdk/control/run opkg upgrade kindle-epub
+# Or remove the package:
+/mnt/us/.eink-sdk/control/run opkg remove kindle-epub
+```
 
-| Command | Effect |
+Stop from a root shell before upgrading or removing the package. Package hooks
+reject changes while activation or recovery state remains: restarting the
+framework during an opkg transaction can terminate a graphical package manager.
+After upgrading, open Native EPUB again to activate the installed version.
+
+Stopping restores owned AppReg rows and reader toggles. Conflicting edits by
+another application are reported instead of overwritten. Books, catalogue
+reading state, and thumbnails are retained. Existing EPUB entries may remain
+visible while the runtime is stopped.
+
+## Paths
+
+Package files are stored under `/mnt/us/.eink-sdk`, with runtime links under
+`/var/run/eink-sdk`:
+
+| Package path | Contents |
 | --- | --- |
-| `./epubctl status` | Show the payload, boot setting, and runtime health. |
-| `./epubctl stop` | Stop the runtime until the next start or boot. |
-| `./epubctl start` | Activate the installed payload. |
-| `./epubctl disable` | Stop and remove boot integration. |
-| `./epubctl rollback` | Activate the previous payload, or restore stock behavior after a first install. |
-| `./epubctl uninstall` | Stop, remove boot integration, and remove runtime state. |
+| `usr/bin/epubctl` | Runtime controller. |
+| `usr/libexec/kindle-epub` | Native probe and catalogue worker. |
+| `usr/lib/kindle-epub` | Reader adapters and JVM support libraries. |
+| `usr/share/kindle-epub` | Java helper, native contracts, runtime metadata and launcher template. |
+| `var/lib/kindle-epub` | Persistent AppReg and reader-toggle recovery state. |
 
-For an upgrade, extract into a **new directory** and run its `epubctl install`.
-Keep the previous payload directory for rollback. Do not overwrite a payload
-that is in use.
+The library launcher is `/mnt/us/documents/kindle-epub.sh`. Volatile runtime
+state and locks are under `/var/run/kindle-epub`; the lifecycle lock is
+`/var/run/kindle-epub.lock`. Java discovery and probe logs are in its `prepare`
+subdirectory, and the worker log is `worker.log`. Native errors also go to syslog.
+Firmware-owned databases and thumbnails retain their stock locations.
 
-Removal retains payload files, books, and catalogue reading state. Existing
-EPUB entries may remain visible while the runtime is disabled. Owned AppReg
-rows and reader toggles are restored; conflicting edits by another application
-are reported instead of overwritten.
+## Cross-build
 
-Use `epubctl status` first when diagnosing activation. Persistent lifecycle state
-and the boot log are under `/var/local/kindle-epub`. Java discovery and probe
-logs are under `/var/run/kindle-epub/prepare`; the catalogue worker log is
-`/var/run/kindle-epub/worker.log`. Native errors also go to device syslog.
+Supply a CMake cross-toolchain file and sysroot for one of the three supported
+ABIs. The sysroot needs zlib, libxml2, libzip 1.11.4+, cJSON 1.7.17+, SQLite,
+and the C++ runtime. Host tools include pkg-config configured for that sysroot,
+ECJ with Java 1.4 support, and a JDK with development tools and JNI headers.
 
-## Build packages
-
-Use x86_64 Linux with CMake 3.24+, Ninja or Make, a JDK, and ECJ 3.32.0
-for Java 1.4 target support. CMake downloads the pinned public KOReader
-cross-toolchains and builds zlib, libzip, libxml2, and cJSON. No firmware image,
-stock library, or Amazon JAR is a build input.
+For example, configure the hard-float runtime with paths from your build
+environment:
 
 ```sh
-cmake -S . -B build/runtime -G Ninja -DEPUB_BUILD_RUNTIME=ON
-CMAKE_BUILD_PARALLEL_LEVEL=4 cmake --build build/runtime
-cmake --build build/runtime --target package
+cmake -S . -B build/kindlehf \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/toolchain.cmake \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DEPUB_BUILD_RUNTIME=ON \
+  -DEPUB_ARCHITECTURE=kindlehf \
+  -DEPUB_LIBZIP_SOURCE_DIR=/path/to/libzip-source \
+  -DPKG_CONFIG_EXECUTABLE=/path/to/target-pkg-config \
+  -DEPUB_ECJ_EXECUTABLE=/path/to/ecj \
+  -DEPUB_JDK_INCLUDE_ROOT=/path/to/jdk/include
+cmake --build build/kindlehf --parallel
+DESTDIR=/path/to/package-root cmake --install build/kindlehf
 ```
 
-The package target writes `build/runtime/kindle-epub-ARCHITECTURE.tar.gz` for
-each configured architecture. Each archive contains a `kindle-epub/` directory.
-To build one architecture, add `-DEPUB_ARCHITECTURES=kindlepw2` at configuration;
-a semicolon-separated list selects several. To install an unpacked payload:
+Use `kindle5` or `kindlepw2` with the corresponding toolchain for the other ABIs.
+CMake builds each architecture's firmware interface variants from
+`architectures.json`. Set `JAVA_HOME` to the host JDK or supply the
+`Java_JAVA_EXECUTABLE`, `Java_JAVAC_EXECUTABLE`, `Java_JAVADOC_EXECUTABLE`, and
+`Java_JAR_EXECUTABLE` cache variables explicitly.
 
-```sh
-cmake --install build/runtime --component kindlepw2 --prefix "$PWD/dist/kindlepw2"
-```
-
-`CMAKE_BUILD_PARALLEL_LEVEL` also bounds each nested dependency and native build.
-Build directories and dependency caches stay under the chosen `-B` directory.
-`-DEPUB_ENABLE_TRACE=ON` enables diagnostic tracing. Dependencies are linked
-privately into device binaries, with their licenses included. Reader adapters
-use the device's dynamic C++ runtime; the standalone controller links its C++
-runtime statically so it can run on older firmware.
-
-Use CMake cache options to supply existing tools:
-
-- `KINDLE5_TOOLCHAIN_ROOT`, `KINDLEPW2_TOOLCHAIN_ROOT`, or `KINDLEHF_TOOLCHAIN_ROOT`
-  selects an installed cross-toolchain. The corresponding `*_TOOLCHAIN_ARCHIVE`
-  accepts a local archive from the pinned release.
-- `EPUB_JDK_INCLUDE_ROOT` selects JNI headers, and `EPUB_ECJ_EXECUTABLE` selects ECJ.
-  CMake's `FindJava` locates the JDK tools.
-- `FETCHCONTENT_SOURCE_DIR_ZLIB`, `FETCHCONTENT_SOURCE_DIR_LIBXML2`,
-  `FETCHCONTENT_SOURCE_DIR_LIBZIP`, and `FETCHCONTENT_SOURCE_DIR_CJSON` select
-  extracted dependency sources for offline builds.
+The libzip source must match the headers installed in the sysroot. The runtime
+builds a private store/deflate-only archive from that source and hides its
+symbols inside the adapters. This keeps incompatible crypto libraries out of
+firmware processes. CMake does not download toolchains or dependencies, or
+create package archives. No firmware image, stock library, or Amazon JAR is a
+build input. `EPUB_ENABLE_TRACE=ON` enables diagnostic tracing.
 
 ## Test and lint
 
 Host builds need a C++11 compiler, CMake, pkg-config, and development files for
-zlib, libxml2, libzip 1.12.1+, cJSON 1.7.17+, and libarchive. If system libraries
-are older, build the pinned dependencies with a host C compiler:
-
-```sh
-cmake -S cmake/public-deps -B build/host-deps \
-    -DCMAKE_INSTALL_PREFIX="$PWD/build/host-deps-install"
-cmake --build build/host-deps --parallel
-cmake --install build/host-deps
-export PKG_CONFIG_PATH="$PWD/build/host-deps-install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-export CMAKE_PREFIX_PATH="$PWD/build/host-deps-install${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
-```
+zlib, libxml2, libzip 1.11.4+, cJSON 1.7.17+, and libarchive.
 
 Libarchive is a separate fixture dependency. Configure and run the existing
 parser, catalogue, scanner, Mobi8, and KPP tests:
@@ -175,7 +179,7 @@ needs the cross-toolchain's C++ headers. `EPUB_CLANG_FORMAT_EXECUTABLE`,
 `EPUB_CLANG_TIDY_EXECUTABLE`, and `EPUB_RUN_CLANG_TIDY_EXECUTABLE` select explicit
 LLVM 18 tools.
 
-Host tests do not exercise device activation, boot hooks, or reader rendering.
+Host tests do not exercise device activation or reader rendering.
 Those require Kindle firmware on a device or in an emulator.
 
 ## Source map
@@ -189,9 +193,9 @@ Those require Kindle firmware on a device or in an emulator.
 | [src/scanner](src/scanner) | Catalogue metadata, scanner plugin, and worker. |
 | [src/runtime](src/runtime) | Native capability probe, process injection, and JVM agent. |
 | [src/java](src/java) | On-device Java discovery and class adaptation. |
-| [src/control](src/control) | Native `epubctl`: activation, boot integration, catalogue ownership, and rollback. |
-| [cmake](cmake) | Toolchains, dependencies, architecture builds, installation, packaging, and checks. |
+| [src/control](src/control) | Native `epubctl`: activation, catalogue ownership and recovery. |
+| [cmake](cmake) | Architecture builds, Java compilation, installation and checks. |
 | [tests](tests) | Host tests and fixture creation. |
 
-Generated packages belong in `dist/` and build products in `build/`; both are
-ignored by Git.
+Local builds belong in `build/`, which is ignored by Git. Packaging systems can
+supply their own build and staging directories.
