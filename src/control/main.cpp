@@ -177,17 +177,35 @@ void runLifecycle(const std::string& command, bool& mutating) {
 }
 
 void printUsage(std::ostream& output) {
-    output << "Usage: epubctl start | status | stop\n";
+    output << "Usage: epubctl start [--background] | status | stop\n";
 }
 
-bool validArguments(const std::string& command, int argc) {
+bool validArguments(const std::string& command, int argc, char** argv) {
     if (command == "start") {
-        return argc == 2;
+        return argc == 2 || (argc == 3 && std::strcmp(argv[2], "--background") == 0);
     }
     if (command == "status") {
         return argc == 1 || argc == 2;
     }
     return argc == 2 && (command == "stop" || command == "_worker");
+}
+
+void detachLauncher() {
+    // The library scriptlet belongs to the framework that activation restarts.
+    // Keep its controller in a separate session and retain activation errors.
+    const int log = open("/var/run/kindle-epub.log", O_WRONLY | O_CREAT | O_TRUNC, kFileMode);
+    if (log < 0) {
+        throw std::runtime_error("Cannot open activation log");
+    }
+    if (daemon(0, 0) != 0) {
+        close(log);
+        throw std::runtime_error("Cannot detach the library launcher");
+    }
+    if (dup2(log, STDOUT_FILENO) < 0 || dup2(log, STDERR_FILENO) < 0) {
+        close(log);
+        throw std::runtime_error("Cannot redirect activation output");
+    }
+    close(log);
 }
 
 int control(int argc, char** argv) {
@@ -196,7 +214,7 @@ int control(int argc, char** argv) {
         printUsage(std::cout);
         return 0;
     }
-    if (!validArguments(command, argc)) {
+    if (!validArguments(command, argc, argv)) {
         printUsage(std::cerr);
         return 2;
     }
@@ -206,11 +224,16 @@ int control(int argc, char** argv) {
     if (setenv("PATH", "/usr/sbin:/sbin:/usr/bin:/bin", 1) != 0) {
         throw std::runtime_error("Cannot configure command search path");
     }
+    unsetenv("LD_LIBRARY_PATH");
+    unsetenv("LD_PRELOAD");
     if (command == "status") {
         return printStatus();
     }
     if (command == "_worker") {
         return superviseWorker();
+    }
+    if (command == "start" && argc == 3) {
+        detachLauncher();
     }
     ensureDirectory(kStateDirectory);
     ensureDirectory("/var/run");
