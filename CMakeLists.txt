@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
-option(EPUB_BUILD_RUNTIME "Build complete Kindle architecture packages" OFF)
+option(EPUB_BUILD_RUNTIME "Build the complete runtime for one Kindle ABI" OFF)
 if(EPUB_BUILD_RUNTIME)
-    project(kindle_epub_runtime LANGUAGES NONE)
+    project(kindle_epub_runtime LANGUAGES CXX)
     include(cmake/Runtime.cmake)
     return()
 endif()
@@ -37,7 +37,7 @@ option(EPUB_BUILD_FRAMEWORK_SUPPORT "Build Java activation support" OFF)
 option(EPUB_BUILD_CATALOG_WORKER "Build the out-of-process catalogue worker" OFF)
 option(EPUB_BUILD_NATIVE_PROBE "Build on-device native interface discovery" OFF)
 cmake_dependent_option(EPUB_BUILD_CONTROL "Build the native runtime control CLI" ON
-    "CMAKE_SYSTEM_NAME STREQUAL Linux" OFF)
+    "CMAKE_SYSTEM_NAME MATCHES Linux|Buildroot" OFF)
 option(EPUB_ENABLE_TRACE "Enable diagnostic device syslog tracing" OFF)
 set(EPUB_CXX11_ABI "0" CACHE STRING
     "libstdc++ dual ABI used by the target firmware (0 or 1)")
@@ -52,9 +52,8 @@ target_compile_definitions(epub_abi INTERFACE
     _GLIBCXX_USE_CXX11_ABI=${EPUB_CXX11_ABI})
 target_include_directories(epub_abi INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-option(EPUB_DEVICE_BUILD "Build for the Kindle public cross-toolchain" OFF)
+option(EPUB_DEVICE_BUILD "Build with a supplied Kindle cross-toolchain" OFF)
 set(EPUB_ARCHITECTURE "" CACHE STRING "Kindle CPU family: kindle5, kindlepw2, kindlehf")
-set(EPUB_DEPENDENCIES "" CACHE PATH "Public static parser/catalogue dependency install prefix")
 set(EPUB_MOBI8_TARGET "external" CACHE STRING "Target label reported by the Mobi8 adapter")
 set(EPUB_MOBI8_PROFILE "mobi8" CACHE STRING "Native interface compatibility profile")
 set(EPUB_KPP_TARGET "${EPUB_MOBI8_TARGET}" CACHE STRING "Target label reported by the KPP adapter")
@@ -85,47 +84,32 @@ if(EPUB_DEVICE_BUILD)
     elseif(EPUB_MOBI8_PROFILE STREQUAL "pw1")
         target_compile_definitions(epub_compile_options INTERFACE KINDLE_EPUB_PW1_ABI=1)
     endif()
-    foreach(required_file lib/libxml2.a lib/libz.a lib/libzip.a lib/libcjson.a
-            include/zlib.h include/zip.h include/zipconf.h include/cjson/cJSON.h
-            include/libxml2/libxml/parser.h)
-        if(NOT EXISTS "${EPUB_DEPENDENCIES}/${required_file}")
-            message(FATAL_ERROR "Build public dependencies first; missing ${EPUB_DEPENDENCIES}/${required_file}")
-        endif()
-    endforeach()
-    add_library(epub_public_xml2 STATIC IMPORTED)
-    set_target_properties(epub_public_xml2 PROPERTIES
-        IMPORTED_LOCATION "${EPUB_DEPENDENCIES}/lib/libxml2.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${EPUB_DEPENDENCIES}/include/libxml2")
-    add_library(epub_public_zlib STATIC IMPORTED)
-    set_target_properties(epub_public_zlib PROPERTIES
-        IMPORTED_LOCATION "${EPUB_DEPENDENCIES}/lib/libz.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${EPUB_DEPENDENCIES}/include")
-    add_library(epub_public_zip STATIC IMPORTED)
-    set_target_properties(epub_public_zip PROPERTIES
-        IMPORTED_LOCATION "${EPUB_DEPENDENCIES}/lib/libzip.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${EPUB_DEPENDENCIES}/include"
-        INTERFACE_LINK_LIBRARIES epub_public_zlib)
-    add_library(epub_public_cjson STATIC IMPORTED)
-    set_target_properties(epub_public_cjson PROPERTIES
-        IMPORTED_LOCATION "${EPUB_DEPENDENCIES}/lib/libcjson.a"
-        INTERFACE_INCLUDE_DIRECTORIES "${EPUB_DEPENDENCIES}/include"
-        INTERFACE_COMPILE_DEFINITIONS CJSON_HIDE_SYMBOLS)
-    set(EPUB_PLATFORM_LIBRARIES epub_public_xml2 epub_public_zip m)
-    set(EPUB_CJSON_LIBRARY epub_public_cjson)
-    # Keep parser/compression symbols private, while C++ objects crossing the
-    # reader boundary continue to use the device's dynamic libstdc++ runtime.
-    target_link_options(epub_compile_options INTERFACE -Wl,--exclude-libs,ALL -Wl,--as-needed)
-    set(CMAKE_SKIP_RPATH TRUE)
     set(EPUB_DEVICE_COMPAT_SOURCE src/runtime/device_compat.cpp)
-else()
-    find_package(PkgConfig REQUIRED)
-    find_package(ZLIB REQUIRED)
-    pkg_check_modules(LIBXML2 REQUIRED IMPORTED_TARGET libxml-2.0)
-    pkg_check_modules(LIBZIP REQUIRED IMPORTED_TARGET libzip>=1.12.1)
-    pkg_check_modules(CJSON REQUIRED IMPORTED_TARGET libcjson>=1.7.17)
-    set(EPUB_PLATFORM_LIBRARIES PkgConfig::LIBXML2 PkgConfig::LIBZIP ZLIB::ZLIB)
-    set(EPUB_CJSON_LIBRARY PkgConfig::CJSON)
 endif()
+
+find_package(PkgConfig REQUIRED)
+find_package(ZLIB REQUIRED)
+pkg_check_modules(LIBXML2 REQUIRED IMPORTED_TARGET libxml-2.0)
+pkg_check_modules(CJSON REQUIRED IMPORTED_TARGET libcjson>=1.7.17)
+if(EPUB_DEVICE_BUILD)
+    set(EPUB_LIBZIP_ARCHIVE "" CACHE FILEPATH "Private libzip archive")
+    if(NOT EXISTS "${EPUB_LIBZIP_ARCHIVE}")
+        message(FATAL_ERROR "Supply EPUB_LIBZIP_ARCHIVE from the runtime build")
+    endif()
+    pkg_check_modules(LIBZIP REQUIRED libzip>=1.11.4)
+    add_library(epub_zip STATIC IMPORTED)
+    set_target_properties(epub_zip PROPERTIES
+        IMPORTED_LOCATION "${EPUB_LIBZIP_ARCHIVE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${LIBZIP_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES ZLIB::ZLIB)
+    target_link_options(epub_compile_options INTERFACE -Wl,--exclude-libs,ALL)
+    set(EPUB_ZIP_LIBRARY epub_zip)
+else()
+    pkg_check_modules(LIBZIP REQUIRED IMPORTED_TARGET libzip>=1.11.4)
+    set(EPUB_ZIP_LIBRARY PkgConfig::LIBZIP)
+endif()
+set(EPUB_PLATFORM_LIBRARIES PkgConfig::LIBXML2 ${EPUB_ZIP_LIBRARY} ZLIB::ZLIB)
+set(EPUB_CJSON_LIBRARY PkgConfig::CJSON)
 
 add_library(epub_core STATIC
     src/epub/archive.cpp
@@ -412,11 +396,6 @@ if(EPUB_BUILD_CONTROL)
     target_compile_definitions(kindle_epub_control PRIVATE
         _FILE_OFFSET_BITS=64 _GLIBCXX_USE_CXX11_ABI=0)
     set_target_properties(kindle_epub_control PROPERTIES OUTPUT_NAME epubctl)
-    if(EPUB_DEVICE_BUILD)
-        # The standalone CLI exchanges no C++ objects with firmware. Its runtime
-        # must not require symbols missing from older device libstdc++ versions.
-        target_link_options(kindle_epub_control PRIVATE -static-libstdc++ -static-libgcc)
-    endif()
 endif()
 
 include(cmake/InstallRuntime.cmake)
