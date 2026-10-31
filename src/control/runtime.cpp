@@ -339,26 +339,13 @@ bool hookReady(const std::string& job, const std::string& library) {
 }
 
 int printStatus() {
-    const std::string state(kStateDirectory);
     const std::string runtime(kRunDirectory);
-    const std::string current = trim(readText(state + "/current", true));
-    if (current.empty()) {
-        std::cout << "not installed\n";
-        return 1;
-    }
-    std::cout << "payload=" << current << '\n';
-    if (isFile(state + "/enabled")) {
-        const std::string boot = trim(readText(state + "/boot-file", true));
-        if (boot.empty() ||
-            readText(boot, true).find("# BEGIN kindle-epub runtime") == std::string::npos) {
-            std::cout << "boot=missing\n";
+    if (!isFile(runtime + "/active")) {
+        if (isFile(runtime + "/selection") ||
+            isDirectory(std::string(kStateDirectory) + "/activation")) {
+            std::cout << "runtime=recovery-required; run epubctl stop or start\n";
             return 1;
         }
-        std::cout << "boot=enabled\n";
-    } else {
-        std::cout << "boot=disabled\n";
-    }
-    if (!isFile(runtime + "/active")) {
         std::cout << "runtime=stopped\n";
         return 0;
     }

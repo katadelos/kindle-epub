@@ -385,7 +385,6 @@ endif()
 if(EPUB_BUILD_CONTROL)
     add_executable(kindle_epub_control
         src/control/main.cpp
-        src/control/boot.cpp
         src/control/system.cpp
         src/control/runtime.cpp
         src/control/activation.cpp

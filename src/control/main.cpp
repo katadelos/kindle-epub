@@ -1,5 +1,4 @@
 #include "activation.hpp"
-#include "boot.hpp"
 #include "runtime.hpp"
 #include "system.hpp"
 
@@ -156,72 +155,14 @@ bool runActivation(const std::string& payload) {
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
-void installPayload(const std::string& requested, bool rollback, bool& mutating) {
-    const std::string state(kStateDirectory);
-    const std::string previous = trim(readText(state + "/current", true));
-    std::string payload = requested;
-    if (rollback) {
-        payload = trim(readText(state + "/previous", true));
-        if (payload.empty()) {
-            mutating = true;
-            disableBoot();
-            deactivate();
-            checkInterrupted();
-            std::cout << "First installation rolled back; stock runtime restored.\n";
-            return;
-        }
-    } else {
-        payload = canonicalPath(payload);
-    }
-    payload = validatePayload(payload).payload;
-    const std::string hook = selectBootHook();
-    const bool wasEnabled = isFile(state + "/enabled");
-    checkInterrupted();
-    mutating = true;
-    deactivate();
-    if (!runActivation(payload)) {
-        deactivate();
-        if (!previous.empty() && !runActivation(previous)) {
-            throw std::runtime_error("Activation failed; previous payload also failed to restart.");
-        }
-        throw std::runtime_error("Activation failed; changes rolled back.");
-    }
-    try {
-        checkInterrupted();
-        enableBoot(hook);
-    } catch (...) {
-        if (!wasEnabled) {
-            disableBoot();
-        }
-        deactivate();
-        if (!previous.empty()) {
-            runActivation(previous);
-        }
-        throw std::runtime_error("Boot integration failed; activation rolled back.");
-    }
-    checkInterrupted();
-    if (!previous.empty() && previous != payload) {
-        writeText(state + "/previous", previous + '\n');
-    }
-    writeText(state + "/current", payload + '\n');
-    sync();
-    std::cout << "Runtime installed and enabled at boot.\n";
-}
-
-void runLifecycle(const std::string& command, const std::string& requested, bool& mutating) {
-    const std::string state(kStateDirectory);
-    if (command == "install" || command == "rollback") {
-        installPayload(requested, command == "rollback", mutating);
-        return;
-    }
+void runLifecycle(const std::string& command, bool& mutating) {
     if (command == "start") {
-        const std::string payload = trim(readText(state + "/current", true));
-        if (payload.empty()) {
-            throw std::runtime_error("No installed payload.");
-        }
+        // Validate the installed package before disturbing a running reader.
+        const std::string payload = validatePayload(kLibraryDirectory).payload;
         if (isFile(std::string(kRunDirectory) + "/active") && printStatus() == 0) {
             return;
         }
+        checkInterrupted();
         mutating = true;
         deactivate();
         if (!runActivation(payload)) {
@@ -231,34 +172,22 @@ void runLifecycle(const std::string& command, const std::string& requested, bool
         return;
     }
     mutating = true;
-    if (command != "stop") {
-        disableBoot();
-    }
     deactivate();
     checkInterrupted();
-    if (command == "uninstall") {
-        removeTree(kStateDirectory);
-        std::cout << "Runtime removed. Payload directories and books retained.\n";
-    }
 }
 
 void printUsage(std::ostream& output) {
-    output << "Usage: epubctl install [PAYLOAD] | start | status | stop | disable | uninstall | "
-              "rollback\n";
+    output << "Usage: epubctl start | status | stop\n";
 }
 
 bool validArguments(const std::string& command, int argc) {
-    if (command == "install") {
-        return argc == 2 || argc == 3;
-    }
-    if (command == "_worker") {
+    if (command == "start") {
         return argc == 2;
     }
     if (command == "status") {
         return argc == 1 || argc == 2;
     }
-    return argc == 2 && (command == "start" || command == "stop" || command == "disable" ||
-                         command == "uninstall" || command == "rollback" || command == "_boot");
+    return argc == 2 && (command == "stop" || command == "_worker");
 }
 
 int control(int argc, char** argv) {
@@ -280,25 +209,16 @@ int control(int argc, char** argv) {
     if (command == "status") {
         return printStatus();
     }
-    if (command == "_boot") {
-        return runBoot();
-    }
     if (command == "_worker") {
         return superviseWorker();
     }
-    const std::string controller = processExecutable(getpid());
-    if (controller.empty()) {
-        throw std::runtime_error("Cannot identify the EPUB controller executable");
-    }
-    const std::string requested =
-        argc > 2 ? argv[2] : controller.substr(0, controller.find_last_of('/'));
     ensureDirectory(kStateDirectory);
     ensureDirectory("/var/run");
     const LifecycleLock lock;
     signalHandlers(interrupt);
     bool mutating = false;
     try {
-        runLifecycle(command, requested, mutating);
+        runLifecycle(command, mutating);
         checkInterrupted();
     } catch (...) {
         if (interrupted == 0) {
