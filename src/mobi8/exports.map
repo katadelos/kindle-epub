@@ -1,0 +1,8 @@
+{
+    global:
+        _ZN8Mobi8SDK18BookManagerFactory14getBookManagerERNS_10ManagedPtrINS_12IBookManagerEEEPKh;
+        g_str_has_suffix;
+        kindle_epub_module_version;
+    local:
+        *;
+};

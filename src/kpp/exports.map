@@ -1,0 +1,6 @@
+KINDLE_EPUB_KPP_0.1 {
+    global:
+        kindle_epub_kpp_version;
+    local:
+        *;
+};

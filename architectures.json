@@ -1,0 +1,42 @@
+{
+  "kindle5": {
+    "variants": [
+      {
+        "profile": "k4",
+        "abi": 0
+      },
+      {
+        "profile": "kt1",
+        "abi": 0
+      },
+      {
+        "profile": "pw1",
+        "abi": 0
+      }
+    ]
+  },
+  "kindlepw2": {
+    "variants": [
+      {
+        "profile": "mobi8-unsized",
+        "abi": 0
+      },
+      {
+        "profile": "mobi8-unsized",
+        "abi": 1
+      }
+    ]
+  },
+  "kindlehf": {
+    "variants": [
+      {
+        "profile": "mobi8",
+        "abi": 0
+      },
+      {
+        "profile": "mobi8",
+        "abi": 1
+      }
+    ]
+  }
+}

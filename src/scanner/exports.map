@@ -1,0 +1,7 @@
+{
+    global:
+        load_kindle_epub_extractor;
+        kindle_epub_extractor_version;
+    local:
+        *;
+};
