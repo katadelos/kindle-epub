@@ -1,7 +1,7 @@
 #include "scanner/catalog.hpp"
+#include "runtime/json.hpp"
 
 #include <algorithm>
-#include <cjson/cJSON.h>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
@@ -34,7 +34,7 @@ std::string bounded(const std::string& value, std::size_t limit) {
     return value.substr(0, length);
 }
 
-using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
+using Json = std::unique_ptr<cJSON, decltype(jsonApi().deleteValue)>;
 
 cJSON* required(cJSON* value) {
     if (value == nullptr) {
@@ -44,8 +44,8 @@ cJSON* required(cJSON* value) {
 }
 
 std::string printJson(const cJSON* value) {
-    const std::unique_ptr<char, decltype(&cJSON_free)> text(cJSON_PrintUnformatted(value),
-                                                            &cJSON_free);
+    const std::unique_ptr<char, decltype(jsonApi().freeMemory)> text(
+        jsonApi().printUnformatted(value), jsonApi().freeMemory);
     if (!text) {
         throw std::bad_alloc();
     }
@@ -55,7 +55,7 @@ std::string printJson(const cJSON* value) {
 cJSON* createText(const std::string& raw, std::size_t limit) {
     const std::string value = bounded(raw, limit);
     if (value.find('\0') == std::string::npos) {
-        return required(cJSON_CreateString(value.c_str()));
+        return required(jsonApi().createString(value.c_str()));
     }
 
     // cJSON strings are NUL-terminated. Escape each span with the library,
@@ -65,7 +65,7 @@ cJSON* createText(const std::string& raw, std::size_t limit) {
     for (;;) {
         const std::size_t end = value.find('\0', start);
         const std::string span = value.substr(start, end - start);
-        const Json text(required(cJSON_CreateString(span.c_str())), &cJSON_Delete);
+        const Json text(required(jsonApi().createString(span.c_str())), jsonApi().deleteValue);
         const std::string escaped = printJson(text.get());
         encoded.append(escaped, 1, escaped.size() - 2);
         if (end == std::string::npos) {
@@ -75,13 +75,13 @@ cJSON* createText(const std::string& raw, std::size_t limit) {
         start = end + 1;
     }
     encoded += '"';
-    return required(cJSON_CreateRaw(encoded.c_str()));
+    return required(jsonApi().createRaw(encoded.c_str()));
 }
 
 void addText(cJSON* object, const char* key, const std::string& value, std::size_t limit) {
     cJSON* text = createText(value, limit);
-    if (cJSON_AddItemToObject(object, key, text) == 0) {
-        cJSON_Delete(text);
+    if (jsonApi().addItemToObject(object, key, text) == 0) {
+        jsonApi().deleteValue(text);
         throw std::bad_alloc();
     }
 }
@@ -138,65 +138,66 @@ std::string buildCatalogChange(const CatalogRecord& record, CatalogOperation ope
     const bool update = operation == CatalogOperation::Update;
     const std::string title =
         record.metadata.title.empty() ? "Untitled EPUB" : record.metadata.title;
-    const Json root(required(cJSON_CreateObject()), &cJSON_Delete);
-    required(cJSON_AddStringToObject(root.get(), "type", "ChangeRequest"));
-    cJSON* commands = required(cJSON_AddArrayToObject(root.get(), "commands"));
-    cJSON* command = required(cJSON_CreateObject());
-    cJSON_AddItemToArray(commands, command);
-    cJSON* entry = required(cJSON_AddObjectToObject(command, update ? "update" : "insert"));
+    const Json root(required(jsonApi().createObject()), jsonApi().deleteValue);
+    required(jsonApi().addStringToObject(root.get(), "type", "ChangeRequest"));
+    cJSON* commands = required(jsonApi().addArrayToObject(root.get(), "commands"));
+    cJSON* command = required(jsonApi().createObject());
+    jsonApi().addItemToArray(commands, command);
+    cJSON* entry = required(jsonApi().addObjectToObject(command, update ? "update" : "insert"));
 
     addText(entry, "uuid", record.uuid, kUuidLength);
     addText(entry, "location", record.location, kMaxScalarBytes);
-    required(cJSON_AddStringToObject(entry, "type", "Entry:Item"));
+    required(jsonApi().addStringToObject(entry, "type", "Entry:Item"));
     // cJSON numbers use double. Raw decimal integers retain all 64 bits.
-    required(cJSON_AddRawToObject(
+    required(jsonApi().addRawToObject(
         entry, "modificationTime", std::to_string(record.modificationTime).c_str()));
-    required(cJSON_AddRawToObject(entry, "diskUsage", std::to_string(record.contentSize).c_str()));
     required(
-        cJSON_AddRawToObject(entry, "contentSize", std::to_string(record.contentSize).c_str()));
+        jsonApi().addRawToObject(entry, "diskUsage", std::to_string(record.contentSize).c_str()));
+    required(
+        jsonApi().addRawToObject(entry, "contentSize", std::to_string(record.contentSize).c_str()));
     addText(entry,
             "version",
             record.packageVersion.empty() ? "3.0" : record.packageVersion,
             kMaxVersionBytes);
     // The Java reader requires Mobi8's content class. Keep the real EPUB path
     // so the reader hooks select this backend.
-    required(cJSON_AddStringToObject(entry, "mimeType", "application/x-mobi8-ebook"));
-    required(cJSON_AddTrueToObject(entry, "isVisibleInHome"));
-    required(cJSON_AddFalseToObject(entry, "isArchived"));
-    required(cJSON_AddFalseToObject(entry, "isDRMProtected"));
+    required(jsonApi().addStringToObject(entry, "mimeType", "application/x-mobi8-ebook"));
+    required(jsonApi().addTrueToObject(entry, "isVisibleInHome"));
+    required(jsonApi().addFalseToObject(entry, "isArchived"));
+    required(jsonApi().addFalseToObject(entry, "isDRMProtected"));
 
     if (update || !record.metadata.language.empty()) {
-        cJSON* languages = required(cJSON_AddArrayToObject(entry, "languages"));
+        cJSON* languages = required(jsonApi().addArrayToObject(entry, "languages"));
         if (!record.metadata.language.empty()) {
-            cJSON_AddItemToArray(languages,
-                                 createText(record.metadata.language, kMaxLanguageBytes));
+            jsonApi().addItemToArray(languages,
+                                     createText(record.metadata.language, kMaxLanguageBytes));
         }
     }
 
-    cJSON* titles = required(cJSON_AddArrayToObject(entry, "titles"));
-    cJSON* localizedTitle = required(cJSON_CreateObject());
-    cJSON_AddItemToArray(titles, localizedTitle);
+    cJSON* titles = required(jsonApi().addArrayToObject(entry, "titles"));
+    cJSON* localizedTitle = required(jsonApi().createObject());
+    jsonApi().addItemToArray(titles, localizedTitle);
     populateLocalized(localizedTitle, title, record.metadata.language);
 
     if (update || !record.metadata.creators.empty()) {
-        cJSON* credits = required(cJSON_AddArrayToObject(entry, "credits"));
+        cJSON* credits = required(jsonApi().addArrayToObject(entry, "credits"));
         const std::size_t count = std::min(record.metadata.creators.size(), kMaxAuthors);
         for (std::size_t index = 0; index < count; ++index) {
-            cJSON* credit = required(cJSON_CreateObject());
-            cJSON_AddItemToArray(credits, credit);
-            required(cJSON_AddStringToObject(credit, "kind", "Author"));
-            cJSON* name = required(cJSON_AddObjectToObject(credit, "name"));
+            cJSON* credit = required(jsonApi().createObject());
+            jsonApi().addItemToArray(credits, credit);
+            required(jsonApi().addStringToObject(credit, "kind", "Author"));
+            cJSON* name = required(jsonApi().addObjectToObject(credit, "name"));
             populateLocalized(
                 name, record.metadata.creators[index], record.metadata.language, kMaxAuthorBytes);
         }
     }
 
     // Stock normal-book presentation excludes transient NEW/SAMPLE displayTags.
-    cJSON* displayObjects = required(cJSON_AddArrayToObject(entry, "displayObjects"));
+    cJSON* displayObjects = required(jsonApi().addArrayToObject(entry, "displayObjects"));
     for (const char* reference : {"titles", "credits"}) {
-        cJSON* display = required(cJSON_CreateObject());
-        cJSON_AddItemToArray(displayObjects, display);
-        required(cJSON_AddStringToObject(display, "ref", reference));
+        cJSON* display = required(jsonApi().createObject());
+        jsonApi().addItemToArray(displayObjects, display);
+        required(jsonApi().addStringToObject(display, "ref", reference));
     }
     if (update || !record.metadata.publisher.empty()) {
         addText(entry, "publisher", record.metadata.publisher, kMaxScalarBytes);
@@ -205,13 +206,13 @@ std::string buildCatalogChange(const CatalogRecord& record, CatalogOperation ope
         addText(entry, "publicationDate", record.metadata.publicationDate, kMaxDateBytes);
     }
     addText(entry, "cdeKey", record.bookId, kMaxIdentifierBytes);
-    required(cJSON_AddStringToObject(entry, "cdeType", "PDOC"));
+    required(jsonApi().addStringToObject(entry, "cdeType", "PDOC"));
     addText(entry, "guid", record.bookId, kMaxIdentifierBytes);
     if (record.thumbnail.action() == ThumbnailChange::Action::Replace) {
         addText(entry, "thumbnail", record.thumbnail.uri(), kMaxScalarBytes);
     } else if (record.thumbnail.action() == ThumbnailChange::Action::Clear) {
         // CCAT uses an empty string, rather than null, to clear its image field.
-        required(cJSON_AddStringToObject(entry, "thumbnail", ""));
+        required(jsonApi().addStringToObject(entry, "thumbnail", ""));
     }
     return printJson(root.get());
 }

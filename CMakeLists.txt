@@ -109,7 +109,17 @@ else()
     set(EPUB_ZIP_LIBRARY PkgConfig::LIBZIP)
 endif()
 set(EPUB_PLATFORM_LIBRARIES PkgConfig::LIBXML2 ${EPUB_ZIP_LIBRARY} ZLIB::ZLIB)
-set(EPUB_CJSON_LIBRARY PkgConfig::CJSON)
+# Load opkg's cJSON independently of the firmware's incompatible cJSON ABI.
+add_library(epub_json STATIC src/runtime/json.cpp)
+target_link_libraries(epub_json PRIVATE epub_compile_options)
+target_include_directories(epub_json PUBLIC ${CJSON_INCLUDE_DIRS})
+if(EPUB_DEVICE_BUILD)
+    target_compile_definitions(epub_json PRIVATE KINDLE_EPUB_DEVICE_JSON=1 _GNU_SOURCE)
+    target_link_libraries(epub_json PRIVATE ${CMAKE_DL_LIBS})
+else()
+    target_link_libraries(epub_json PUBLIC PkgConfig::CJSON)
+endif()
+set(EPUB_CJSON_LIBRARY epub_json)
 
 add_library(epub_core STATIC
     src/epub/archive.cpp

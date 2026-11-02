@@ -1,14 +1,15 @@
 #include "activation.hpp"
+#include "runtime/json.hpp"
 #include "system.hpp"
 
 #include <array>
-#include <cjson/cJSON.h>
 #include <iostream>
 #include <memory>
 #include <new>
 #include <stdexcept>
 
 namespace epubctl {
+using kindle_epub::jsonApi;
 namespace {
 
 struct OwnedRows {
@@ -87,39 +88,41 @@ void registerCatalogue(const RuntimeSelection& selection) {
     }
     ensureDirectory(std::string(kStateDirectory) + "/activation");
     writeText(snapshotPath("before"), snapshotCatalogue());
-    const std::unique_ptr<cJSON, decltype(&cJSON_Delete)> registration(cJSON_Parse(R"([
+    const std::unique_ptr<cJSON, decltype(jsonApi().deleteValue)> registration(
+        jsonApi().parse(R"([
         {"def":"mimetype","assoc":{"mimetype":"MT:application/epub+zip","extensions":["epub","EPUB"]}},
         {"def":"handlerId","assoc":{"handlerId":"org.kindle.epub.extractor","props":{"lib":"","entry":""}}},
         {"def":"association","assoc":{"interface":"extractor","handlerId":"org.kindle.epub.extractor","contentIds":["GL:*.epub","GL:*.EPUB"],"default":"true"}},
         {"def":"association","assoc":{"interface":"application","handlerId":"","contentIds":["MT:application/epub+zip"],"default":"true"}}
     ])"),
-                                                                       &cJSON_Delete);
+        jsonApi().deleteValue);
     if (registration == nullptr) {
         throw std::bad_alloc();
     }
-    auto* handler =
-        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(registration.get(), 1), "assoc");
-    auto* properties = cJSON_GetObjectItemCaseSensitive(handler, "props");
-    auto* application =
-        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(registration.get(), 3), "assoc");
+    auto* handler = jsonApi().getObjectItemCaseSensitive(
+        jsonApi().getArrayItem(registration.get(), 1), "assoc");
+    auto* properties = jsonApi().getObjectItemCaseSensitive(handler, "props");
+    auto* application = jsonApi().getObjectItemCaseSensitive(
+        jsonApi().getArrayItem(registration.get(), 3), "assoc");
     const bool plugin = selection.backend == CatalogueBackend::Plugin;
     const auto library = plugin ? selection.nativeDir + "/libkindle-epub-extractor.so"
                                 : "/usr/lib/ccat/libEBridge.so";
-    if (cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(properties, "lib"),
-                             library.c_str()) == nullptr ||
-        cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(properties, "entry"),
-                             plugin ? "load_kindle_epub_extractor" : "load_bridge") == nullptr ||
-        cJSON_AddStringToObject(properties,
-                                plugin ? "libUnload" : "lipcId",
-                                plugin ? "false" : "org.kindle.epub.scanner") == nullptr ||
-        cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(application, "handlerId"),
-                             selection.applicationHandler.c_str()) == nullptr) {
+    if (jsonApi().setValueString(jsonApi().getObjectItemCaseSensitive(properties, "lib"),
+                                 library.c_str()) == nullptr ||
+        jsonApi().setValueString(jsonApi().getObjectItemCaseSensitive(properties, "entry"),
+                                 plugin ? "load_kindle_epub_extractor" : "load_bridge") ==
+            nullptr ||
+        jsonApi().addStringToObject(properties,
+                                    plugin ? "libUnload" : "lipcId",
+                                    plugin ? "false" : "org.kindle.epub.scanner") == nullptr ||
+        jsonApi().setValueString(jsonApi().getObjectItemCaseSensitive(application, "handlerId"),
+                                 selection.applicationHandler.c_str()) == nullptr) {
         throw std::bad_alloc();
     }
     std::string contents;
     for (const auto* entry = registration->child; entry != nullptr; entry = entry->next) {
-        const std::unique_ptr<char, decltype(&cJSON_free)> text(cJSON_PrintUnformatted(entry),
-                                                                &cJSON_free);
+        const std::unique_ptr<char, decltype(jsonApi().freeMemory)> text(
+            jsonApi().printUnformatted(entry), jsonApi().freeMemory);
         if (text == nullptr) {
             throw std::bad_alloc();
         }
