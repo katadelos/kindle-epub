@@ -152,8 +152,19 @@ void probeKpp(const ElfImage& kpp) {
         }
     }
     const kindle_epub::kpp::HookSites sites = kindle_epub::kpp::discover(image);
+    Elf32_Sym bookManager;
+    if (!kpp.symbol(factory, &bookManager) && !kpp.symbol(factory, &bookManager, false)) {
+        // Older KPP applications do not embed the Mobi8 reader. A partial hook
+        // match is not evidence of that layout: it must still fail closed.
+        require(sites.extensionCount == 0 && sites.factoryCount == 0,
+                "KPP hook candidates have no native Mobi8 factory contract");
+        std::puts("epub_kpp_mobi8=absent");
+        return;
+    }
     require(sites.extensionCount == 1 && sites.factoryCount == 1 && sites.stringAbi <= 1,
-            "KPP native hooks are unsupported or ambiguous");
+            "KPP native hooks are unsupported or ambiguous (extension=" +
+                std::to_string(sites.extensionCount) +
+                " factory=" + std::to_string(sites.factoryCount) + ")");
     const std::size_t trampolineSize = kindle_epub::kpp::kTrampolineSize;
     alignas(4) unsigned char trampoline[2 * trampolineSize];
     require(kindle_epub::kpp::makeTrampoline(

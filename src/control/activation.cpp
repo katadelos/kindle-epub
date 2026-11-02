@@ -82,12 +82,19 @@ void selectKpp(RuntimeSelection& selection) {
         sleepSeconds(1);
     }
     if (!readerExecutable.empty()) {
-        const auto result =
-            runCommand({std::string(kLibexecDirectory) + "/kindle-epub-probe", "--kpp", readerExecutable},
-                       {},
-                       {{"LD_PRELOAD", ""}});
+        const auto result = runCommand(
+            {std::string(kLibexecDirectory) + "/kindle-epub-probe", "--kpp", readerExecutable},
+            {},
+            {{"LD_PRELOAD", ""}});
         if (result.status == 0) {
             const auto value = trim(result.output);
+            if (value == "epub_kpp_mobi8=absent") {
+                // KPP can handle other formats while MOBI8 remains in Java.
+                // selectCatalogue must confirm that the registered reader is
+                // usable; KPP feature flags alone do not identify that route.
+                std::cout << "KPP has no native Mobi8 reader; checking the registered reader.\n";
+                return;
+            }
             if (value != "epub_kpp_abi=0" && value != "epub_kpp_abi=1") {
                 throw std::runtime_error("Invalid KPP native probe result.");
             }
