@@ -10,6 +10,7 @@
 #include <limits>
 #include <map>
 #include <pwd.h>
+#include <signal.h>
 #include <sstream>
 #include <stdexcept>
 #include <sys/stat.h>
@@ -37,7 +38,7 @@ std::string runPath(const std::string& name) {
 }
 
 bool nonemptyFile(const std::string& path) {
-    struct stat information {};
+    struct stat information{};
     return stat(path.c_str(), &information) == 0 && S_ISREG(information.st_mode) &&
            information.st_size > 0;
 }
@@ -293,8 +294,9 @@ void waitFramework() {
 }
 
 void pauseAppmgr(const RuntimeSelection& selection) {
-    if (!selection.kppLibrary.empty() && jobExists("appmgrd") && jobRunning("appmgrd")) {
-        // KPP's stock post-stop hook reports intentional exits as crashes.
+    if (!selection.kppLibrary.empty() && jobExists("kppmainapp") &&
+        jobExists("appmgrd") && jobRunning("appmgrd")) {
+        // Keep the application manager paused while replacing native KPP hooks.
         writeText(runPath("appmgrd-paused"), "");
         checkedCommand({"initctl", "stop", "appmgrd"});
     }
@@ -407,6 +409,108 @@ void activatePmond(const RuntimeSelection& selection) {
     checkedCommand({"/etc/init.d/framework", "start"}, {}, frameworkEnvironment(selection));
 }
 
+void restoreKppAppmgr() {
+    const auto saved = runPath("kpp-stop-appmgr.preload");
+    if (!isFile(saved)) {
+        return;
+    }
+    if (!jobRunning("appmgrd")) {
+        checkedCommand({"initctl", "start", "appmgrd",
+                        "LD_PRELOAD=" + trim(readText(saved))});
+    }
+    waitUntil(kOwnerTimeout, "Application manager did not return after KPP stop.", [] {
+        return runCommand({"lipc-probe", "com.lab126.appmgrd"}).status == 0;
+    });
+    removeFile(saved);
+}
+
+void pauseKppAppmgr() {
+    if (!jobExists("appmgrd") || !jobRunning("appmgrd")) {
+        return;
+    }
+    const auto managers = processPids({"appmgrd"});
+    if (managers.size() != 1) {
+        throw std::runtime_error("Cannot identify the application manager.");
+    }
+    const auto saved = runPath("kpp-stop-appmgr.preload");
+    if (!isFile(saved)) {
+        writeText(saved, processEnvironment(managers.front(), "LD_PRELOAD"));
+    }
+    checkedCommand({"initctl", "stop", "appmgrd"});
+}
+
+// Stock KPP can crash in static destructors during SIGTERM shutdown. Freeze it
+// before asking Upstart to stop, so it cannot enter that cleanup or respawn.
+// Only this intentional stop clears the stock crash-loop marker.
+void stopKppProcess() {
+    if (!jobExists("kppmainapp")) {
+        return;
+    }
+    bool running = false;
+    waitUntil(kKppTimeout, "KPP did not reach a stable service state.", [&running] {
+        const auto result = runCommand({"initctl", "status", "kppmainapp"});
+        running = result.status == 0 &&
+                  result.output.find("start/running") != std::string::npos;
+        return running || (result.status == 0 &&
+                           result.output.find("stop/waiting") != std::string::npos);
+    });
+    if (!running) {
+        return;
+    }
+    const auto readers = processPids(kKppProcessNames);
+    if (readers.size() != 1) {
+        throw std::runtime_error("Cannot identify the KPP process to stop.");
+    }
+    const pid_t process = readers.front();
+    const auto flag = processEnvironment(process, "KPPMAINAPP_FLAG_FILE");
+    if (!flag.empty() && flag.compare(0, 5, "/tmp/") != 0 &&
+        flag.compare(0, 9, "/var/run/") != 0) {
+        throw std::runtime_error("KPP crash marker is outside its runtime directories.");
+    }
+    if (kill(process, SIGSTOP) != 0) {
+        throw std::runtime_error("Cannot pause KPP for its intentional restart.");
+    }
+    bool stopping = false;
+    try {
+        waitUntil(kOwnerTimeout, "KPP did not pause for restart.", [process] {
+            const auto stat = readText("/proc/" + std::to_string(process) + "/stat");
+            const auto end = stat.rfind(')');
+            return end != std::string::npos && end + 2 < stat.size() &&
+                   stat[end + 2] == 'T';
+        });
+        pauseKppAppmgr();
+        checkedCommand({"initctl", "stop", "--no-wait", "kppmainapp"});
+        stopping = true;
+        if (!flag.empty()) {
+            removeFile(flag);
+        }
+        if (kill(process, SIGKILL) != 0 && errno != ESRCH) {
+            throw std::runtime_error("Cannot terminate the stopped KPP process.");
+        }
+        waitUntil(kOwnerTimeout, "KPP did not finish its intentional stop.", [] {
+            const auto result = runCommand({"initctl", "status", "kppmainapp"});
+            return result.status == 0 &&
+                   result.output.find("stop/waiting") != std::string::npos;
+        });
+    } catch (...) {
+        // Never leave KPP frozen if a command or filesystem operation fails.
+        kill(process, stopping ? SIGKILL : SIGCONT);
+        throw;
+    }
+}
+
+void stopKpp() {
+    try {
+        stopKppProcess();
+    } catch (...) {
+        restoreKppAppmgr();
+        throw;
+    }
+    // Java must initialize with appmgr available, including after interruption.
+    // KPP's post-stop recovery notification has finished before it returns.
+    restoreKppAppmgr();
+}
+
 void activateUpstart(const RuntimeSelection& selection) {
     pauseAppmgr(selection);
     if (selection.javaMode != JavaMode::None) {
@@ -416,6 +520,7 @@ void activateUpstart(const RuntimeSelection& selection) {
         for (const auto& variable : frameworkEnvironment(selection)) {
             restart.push_back(variable.first + '=' + variable.second);
         }
+        stopKpp();
         checkedCommand(restart);
         if (!selection.kppLibrary.empty()) {
             waitFramework();
@@ -436,8 +541,11 @@ void activateUpstart(const RuntimeSelection& selection) {
         }
         writeText(runPath(job + "-restarted"), "");
         const auto& library = webreader ? selection.readerLibrary : selection.kppLibrary;
+        if (!webreader) {
+            stopKpp();
+        }
         checkedCommand({"initctl",
-                        "restart",
+                        webreader ? "restart" : "start",
                         job,
                         "LD_PRELOAD=" + preload(library, trim(readText(runPath(job + ".preload")))),
                         "KINDLE_EPUB_HOOK_READY=" + hookMarker});
@@ -543,6 +651,7 @@ void deactivatePmond() {
 void deactivateUpstart(const RuntimeSelection& selection) {
     pauseAppmgr(selection);
     if (isFile(runPath("framework-restarted"))) {
+        stopKpp();
         checkedCommand({"initctl",
                         "restart",
                         "framework",
@@ -558,9 +667,13 @@ void deactivateUpstart(const RuntimeSelection& selection) {
     for (const auto* jobName : {"webreader", "kppmainapp"}) {
         const std::string job(jobName);
         if (isFile(runPath(job + "-restarted"))) {
-            waitJob(job);
+            if (job == "kppmainapp") {
+                stopKpp();
+            } else {
+                waitJob(job);
+            }
             checkedCommand({"initctl",
-                            "restart",
+                            job == "kppmainapp" ? "start" : "restart",
                             job,
                             "LD_PRELOAD=" + trim(readText(runPath(job + ".restore-preload"))),
                             "KINDLE_EPUB_HOOK_READY="});
