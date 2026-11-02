@@ -18,6 +18,7 @@ const char kLibexecDirectory[] = "/var/run/eink-sdk/usr/libexec/kindle-epub";
 const char kStateDirectory[] = "/mnt/us/.eink-sdk/var/lib/kindle-epub";
 const char kRunDirectory[] = "/var/run/kindle-epub";
 const char kLockPath[] = "/var/run/kindle-epub.lock";
+const std::vector<std::string> kKppProcessNames = {"KPPMainAppV2", "KPPMainAppV1", "KPPMainApp"};
 
 namespace {
 
@@ -72,7 +73,7 @@ void requirePayloadPath(const std::string& path) {
 }
 
 void requireFile(const std::string& path) {
-    struct stat status {};
+    struct stat status{};
     if (stat(path.c_str(), &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0) {
         throw std::runtime_error("Missing or empty runtime file: " + path);
     }
@@ -232,8 +233,8 @@ RuntimeSelection validatePayload(const std::string& path) {
     requireFile(selection.readerLibrary);
     if (!isFile("/etc/JAVA_FREE")) {
         requireFile(std::string(kDataDirectory) + "/kindle-epub-java.jar");
-        for (const char* name : {"libkindle-epub-framework-exec.so",
-                                 "libkindle-epub-java-agent.so"}) {
+        for (const char* name :
+             {"libkindle-epub-framework-exec.so", "libkindle-epub-java-agent.so"}) {
             requireFile(selection.payload + "/" + name);
         }
     }
@@ -324,7 +325,7 @@ bool hookReady(const std::string& job, const std::string& library) {
     if (job == "webreader") {
         names = {"webreader"};
     } else if (job == "kppmainapp") {
-        names = {"KPPMainAppV2", "KPPMainApp"};
+        names = kKppProcessNames;
     } else {
         throw std::invalid_argument("Unknown native hook service");
     }

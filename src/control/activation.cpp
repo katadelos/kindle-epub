@@ -71,7 +71,7 @@ void selectKpp(RuntimeSelection& selection) {
     }
     std::string readerExecutable;
     for (unsigned elapsed = 0; elapsed < kKppTimeout; ++elapsed) {
-        const auto readers = processPids({"KPPMainAppV2", "KPPMainApp"});
+        const auto readers = processPids(kKppProcessNames);
         if (readers.size() > 1) {
             throw std::runtime_error("More than one KPP reader is running.");
         }
@@ -323,8 +323,7 @@ void resumeAppmgr(const std::string& savedPreload) {
 
 void prepareHook(const std::string& job) {
     const std::vector<std::string> names =
-        job == "webreader" ? std::vector<std::string>{"webreader"}
-                           : std::vector<std::string>{"KPPMainAppV2", "KPPMainApp"};
+        job == "webreader" ? std::vector<std::string>{"webreader"} : kKppProcessNames;
     uid_t owner = 0;
     waitUntil(
         kOwnerTimeout, "Cannot identify the stock " + job + " service owner.", [&names, &owner] {
@@ -614,7 +613,7 @@ void deactivate() {
                   [&selection] {
                       return !mapped({"cvm", "java", "webreader"}, selection.readerLibrary) &&
                              (selection.kppLibrary.empty() ||
-                              !mapped({"KPPMainAppV2", "KPPMainApp"}, selection.kppLibrary));
+                              !mapped(kKppProcessNames, selection.kppLibrary));
                   });
     }
     removeTree(kRunDirectory);

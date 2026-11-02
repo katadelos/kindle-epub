@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace epubctl {
 
@@ -13,6 +14,7 @@ extern const char kLibexecDirectory[];
 extern const char kStateDirectory[];
 extern const char kRunDirectory[];
 extern const char kLockPath[];
+extern const std::vector<std::string> kKppProcessNames;
 
 enum class CatalogueBackend : std::uint8_t { Java, Plugin, Worker };
 enum class JavaMode : std::uint8_t { None, Classpath, Agent };
