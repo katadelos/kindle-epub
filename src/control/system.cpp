@@ -62,13 +62,16 @@ void writeAll(int descriptor, const std::string& text) {
     }
 }
 
-std::string readAll(int descriptor) {
+std::string readAll(int descriptor, bool processFile = false) {
     std::string result;
     char buffer[kReadBufferSize];
     for (;;) {
         const ssize_t count = read(descriptor, buffer, sizeof(buffer));
         if (count < 0 && errno == EINTR) {
             continue;
+        }
+        if (count < 0 && processFile && errno == ESRCH) {
+            return {};
         }
         if (count < 0) {
             throw systemError("Cannot read file");
@@ -199,14 +202,15 @@ std::string checkedCommand(const std::vector<std::string>& arguments,
 }
 
 std::string readText(const std::string& path, bool optional) {
+    const bool processFile = optional && path.compare(0, 6, "/proc/") == 0;
     Descriptor file(open(path.c_str(), O_RDONLY));
     if (file.get() < 0) {
-        if (optional && (errno == ENOENT || errno == ENOTDIR)) {
+        if (optional && (errno == ENOENT || errno == ENOTDIR || (processFile && errno == ESRCH))) {
             return {};
         }
         throw systemError("Cannot read " + path);
     }
-    return readAll(file.get());
+    return readAll(file.get(), processFile);
 }
 
 std::string trim(const std::string& text) {
