@@ -389,14 +389,12 @@ void activatePmond(const RuntimeSelection& selection) {
         prepareHook("webreader");
         command += "KINDLE_EPUB_HOOK_READY=" + runPath("webreader.hook-ready") + ' ';
     }
-    const auto libraries =
+    auto libraries =
         preload(selection.readerLibrary, trim(readText(runPath("webreader.preload"))));
-    // The stock supervisor stores a command string. Quote only the injected environment value.
-    std::string quoted = "'";
-    for (const char character : libraries) {
-        quoted += character == '\'' ? "'\\''" : std::string(1, character);
-    }
-    command += "LD_PRELOAD=" + quoted + "' " + stockCommand;
+    // pmond splits arguments itself and preserves shell quotes literally.
+    // Keep the loader's space-separated entries in one colon-separated argument.
+    std::replace(libraries.begin(), libraries.end(), ' ', ':');
+    command += "LD_PRELOAD=" + libraries + ' ' + stockCommand;
     checkedCommand({"/etc/init.d/framework", "stop"});
     stopPmondReader();
     checkedCommand({"/etc/init.d/pmond", "stop"});
